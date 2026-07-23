@@ -1,6 +1,10 @@
 pipeline {
     agent any
 
+    options {
+        disableConcurrentBuilds()
+    }
+
     environment {
         IMAGE = 'ghcr.io/888lilili/cicd-demo'
     }
@@ -15,7 +19,7 @@ pipeline {
             }
         }
 
-        stage('Login and Push Image') {
+        stage('Push Image') {
             steps {
                 withCredentials([
                     usernamePassword(
@@ -38,24 +42,30 @@ pipeline {
             }
         }
 
-        stage('Deploy Container') {
+        stage('Update GitOps') {
             steps {
                 sh '''
-                    docker rm -f cicd-demo || true
+                    rm -rf gitops
 
-                    docker run -d \
-                      --name cicd-demo \
-                      -p 18080:80 \
-                      ${IMAGE}:${BUILD_NUMBER}
-                '''
-            }
-        }
+                    git clone \
+                      git@github-gitops:888lilili/cicd-demo-gitops.git \
+                      gitops
 
-        stage('Verify') {
-            steps {
-                sh '''
-                    sleep 2
-                    curl -fsS http://127.0.0.1:18080
+                    cd gitops
+
+                    git config user.name "jenkins"
+                    git config user.email "jenkins@master"
+
+                    sed -i -E \
+                      "s#image: ghcr.io/888lilili/cicd-demo:[^[:space:]]+#image: ${IMAGE}:${BUILD_NUMBER}#" \
+                      k8s/deploy.yaml
+
+                    echo "修改后的镜像："
+                    grep 'image:' k8s/deploy.yaml
+
+                    git add k8s/deploy.yaml
+                    git commit -m "Deploy cicd-demo:${BUILD_NUMBER}"
+                    git push origin main
                 '''
             }
         }
